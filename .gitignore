@@ -1,0 +1,28 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Node modules
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment variables
+.env
+*.pem
+
+# Logs
+*.log
+
+# Build directories
+target/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db

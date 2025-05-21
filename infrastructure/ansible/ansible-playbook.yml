@@ -1,0 +1,239 @@
+- name: Configure k8s Jenkins and Docker on EC2 Instances
+  hosts: all
+  become: true
+  connection: ssh
+  tasks:
+    # Common tasks for all nodes
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name: 
+          - openjdk-11-jdk
+          - python3-pip
+          - python3-docker
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+        state: present
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add Kubernetes GPG key
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+
+    - name: Add Kubernetes repository
+      apt_repository:
+        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+
+    - name: Install Kubernetes packages
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: yes
+
+    - name: Hold Kubernetes packages
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Configure sysctl for Kubernetes
+      sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: Disable swap
+      command: swapoff -a
+      changed_when: false
+
+    - name: Remove swap from fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^([^#].*\sswap\s+sw\s+.*)$'
+        replace: '# \1'
+
+- name: Configure Kubernetes Master
+  hosts: master
+  become: true
+  tasks:
+    - name: Initialize Kubernetes cluster
+      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      register: kubeadm_init
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Create .kube directory
+      file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Copy admin.conf to user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        remote_src: yes
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Install Flannel CNI
+      become: false
+      command: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
+      changed_when: false
+
+    - name: Get join command
+      command: kubeadm token create --print-join-command
+      register: join_command
+      changed_when: false
+
+    - name: Store join command
+      set_fact:
+        join_command: "{{ join_command.stdout }}"
+
+- name: Configure Kubernetes Workers
+  hosts: workers
+  become: true
+  tasks:
+    - name: Join cluster
+      command: "{{ hostvars['master'].join_command }}"
+      register: join_cluster
+      changed_when: false
+      ignore_errors: yes
+
+- name: Install Jenkins on Master
+  hosts: master
+  become: true
+  tasks:
+    - name: Add Jenkins repository key
+      apt_key:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+        state: present
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: deb https://pkg.jenkins.io/debian-stable binary/
+        state: present
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+        update_cache: yes
+
+    - name: Start Jenkins service
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Add Jenkins user to docker group
+      user:
+        name: jenkins
+        groups: docker
+        append: yes
+
+    - name: Wait for Jenkins to start up
+      uri:
+        url: http://localhost:8080
+        status_code: 200
+        timeout: 5
+      register: jenkins_status
+      retries: 12
+      delay: 5
+      until: jenkins_status.status == 200
+      ignore_errors: yes
+
+    - name: Get Jenkins initial admin password
+      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_password
+      changed_when: false
+
+    - name: Display Jenkins initial admin password
+      debug:
+        var: jenkins_password.stdout
+
+- name: Verify Kubernetes Setup
+  hosts: master
+  become: false
+  tasks:
+    - name: Wait for nodes to be ready
+      shell: kubectl get nodes | grep Ready | wc -l
+      register: ready_nodes
+      until: ready_nodes.stdout | int >= 3  # 1 master + 2 workers
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Show cluster status
+      command: kubectl get nodes -o wide
+      register: cluster_status
+      changed_when: false
+
+    - name: Display cluster status
+      debug:
+        var: cluster_status.stdout_lines
+
+    - name: Copy test deployment file
+      copy:
+        src: test-deployment.yml
+        dest: /home/ubuntu/test-deployment.yml
+
+    - name: Apply test deployment
+      command: kubectl apply -f /home/ubuntu/test-deployment.yml
+      register: test_deployment
+      changed_when: false
+
+    - name: Wait for test pod to be ready
+      shell: kubectl get pods | grep nginx-test | grep Running | wc -l
+      register: test_pod
+      until: test_pod.stdout | int >= 1
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Show test deployment status
+      command: kubectl get pods
+      register: pod_status
+      changed_when: false
+
+    - name: Display test deployment status
+      debug:
+        var: pod_status.stdout_lines
