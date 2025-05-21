@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insurance-app
+  labels:
+    app: insurance-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: insurance-app
+  template:
+    metadata:
+      labels:
+        app: insurance-app
+    spec:
+      containers:
+      - name: insurance-app
+        image: insurance-app:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
