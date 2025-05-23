@@ -1,0 +1,13 @@
+version: '3'
+services:
+  insureme:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: insureme:latest
+    container_name: insureme-app
+    ports:
+      - "8081:8081"
+    environment:
+      - SERVER_PORT=8081
+    restart: always
