@@ -1,5 +1,7 @@
 provider "aws" {
-  region = var.aws_region
+  region     = var.aws_region
+  access_key = var.aws_access_key
+  secret_key = var.aws_secret_key
 }
 
 # VPC
@@ -52,12 +54,6 @@ resource "aws_route_table" "public_rt" {
 resource "aws_route_table_association" "public_rta" {
   subnet_id      = aws_subnet.public_subnet.id
   route_table_id = aws_route_table.public_rt.id
-}
-
-# Key Pair
-resource "aws_key_pair" "insurance_key" {
-  key_name   = "insurance-key"
-  public_key = var.ssh_public_key
 }
 
 # Master Node

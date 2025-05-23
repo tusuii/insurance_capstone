@@ -1,81 +1,134 @@
-- name: Configure k8s Jenkins and Docker on EC2 Instances
+- name: update operating system
   hosts: all
   become: true
-  connection: ssh
   tasks:
-    # Common tasks for all nodes
-    - name: Update apt cache
+    - name: update apt
       apt:
         update_cache: yes
-
-    - name: Install required packages
+  
+- name: Install Docker Compose
+  hosts: all
+  become: true
+  tasks:
+    - name: Install docker-compose
       apt:
-        name: 
-          - openjdk-11-jdk
-          - python3-pip
-          - python3-docker
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - gnupg
-        state: present
-
-    - name: Add Docker GPG key
-      apt_key:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        state: present
-
-    - name: Add Docker repository
-      apt_repository:
-        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
-        state: present
-
-    - name: Install Docker
-      apt:
-        name: docker-ce
+        name: docker-compose
         state: present
         update_cache: yes
 
-    - name: Start Docker service
-      service:
-        name: docker
+- name: Configure Kubernetes Master
+  hosts: master
+  become: true
+  tasks:
+    - name: Download k8s-master.sh
+      get_url:
+        url: https://raw.githubusercontent.com/akshu20791/Deployment-script/main/k8s-master.sh
+        dest: /root/k8s-master.sh
+        mode: '0777'
+
+    - name: Execute k8s-master.sh
+      shell: /root/k8s-master.sh
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    - name: Configure br_netfilter
+      shell: |
+        modprobe br_netfilter
+        echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables
+        echo 1 > /proc/sys/net/ipv4/ip_forward
+
+    - name: Get join command
+      shell: kubeadm token create --print-join-command
+      register: join_command
+
+    - name: Store join command
+      set_fact:
+        join_command: "{{ join_command.stdout_lines[0] }} --cri-socket unix:///var/run/cri-dockerd.sock"
+
+- name: Configure Kubernetes Workers
+  hosts: workers
+  become: true
+  tasks:
+    - name: Download k8s-nodes.sh
+      get_url:
+        url: https://raw.githubusercontent.com/akshu20791/Deployment-script/main/k8s-nodes.sh
+        dest: /root/k8s-nodes.sh
+        mode: '0777'
+
+    - name: Execute k8s-nodes.sh
+      shell: /root/k8s-nodes.sh
+      args:
+        creates: /usr/bin/kubelet
+
+    - name: Configure br_netfilter
+      shell: |
+        modprobe br_netfilter
+        echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables
+        echo 1 > /proc/sys/net/ipv4/ip_forward
+
+    - name: Join cluster
+      shell: "{{ hostvars['13.217.116.56'].join_command }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+
+    - name: Install cri-dockerd
+      shell: |
+        VERSION=0.3.4
+        wget -O /tmp/cri-dockerd.deb https://github.com/Mirantis/cri-dockerd/releases/download/v${VERSION}/cri-dockerd_${VERSION}-0.ubuntu-jammy_amd64.deb
+        dpkg -i /tmp/cri-dockerd.deb
+      args:
+        creates: /usr/bin/cri-dockerd
+
+    - name: Start cri-dockerd
+      systemd:
+        name: cri-docker.service
         state: started
         enabled: yes
+        daemon_reload: yes
 
-    - name: Add Kubernetes GPG key
-      apt_key:
-        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    - name: Install Kubernetes components
+      shell: |
+        RELEASE=v1.28.1
+        cd /tmp
+        curl -LO "https://dl.k8s.io/release/${RELEASE}/bin/linux/amd64/kubectl"
+        curl -LO "https://dl.k8s.io/release/${RELEASE}/bin/linux/amd64/kubeadm"
+        curl -LO "https://dl.k8s.io/release/${RELEASE}/bin/linux/amd64/kubelet"
+        chmod +x kubectl kubeadm kubelet
+        mv kubectl kubeadm kubelet /usr/local/bin/
+        curl -sSL https://raw.githubusercontent.com/kubernetes/release/v0.14.0/cmd/kubepkg/templates/latest/deb/kubelet/lib/systemd/system/kubelet.service | sudo tee /etc/systemd/system/kubelet.service
+        mkdir -p /etc/systemd/system/kubelet.service.d
+        curl -sSL https://raw.githubusercontent.com/kubernetes/release/v0.14.0/cmd/kubepkg/templates/latest/deb/kubeadm/10-kubeadm.conf | sudo tee /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+      args:
+        creates: /usr/local/bin/kubectl
+
+    - name: Start kubelet service
+      systemd:
+        name: kubelet
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Load br_netfilter module
+      modprobe:
+        name: br_netfilter
         state: present
 
-    - name: Add Kubernetes repository
-      apt_repository:
-        repo: deb https://apt.kubernetes.io/ kubernetes-xenial main
-        state: present
+    - name: Ensure br_netfilter module is loaded at boot
+      lineinfile:
+        path: /etc/modules-load.d/k8s.conf
+        line: br_netfilter
+        create: yes
+        mode: '0644'
 
-    - name: Install Kubernetes packages
-      apt:
-        name:
-          - kubelet
-          - kubeadm
-          - kubectl
-        state: present
-        update_cache: yes
-
-    - name: Hold Kubernetes packages
-      dpkg_selections:
-        name: "{{ item }}"
-        selection: hold
-      loop:
-        - kubelet
-        - kubeadm
-        - kubectl
-
-    - name: Configure sysctl for Kubernetes
-      sysctl:
-        name: net.bridge.bridge-nf-call-iptables
-        value: '1'
-        state: present
-        reload: yes
+    - name: Enable bridge-nf-call-iptables
+      shell: |
+        echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
+        echo '1' > /proc/sys/net/bridge/bridge-nf-call-ip6tables
+        echo 'net.bridge.bridge-nf-call-iptables=1' >> /etc/sysctl.conf
+        echo 'net.bridge.bridge-nf-call-ip6tables=1' >> /etc/sysctl.conf
+        sysctl -p
+      args:
+        creates: /proc/sys/net/bridge/bridge-nf-call-iptables
 
     - name: Disable swap
       command: swapoff -a
@@ -92,7 +145,8 @@
   become: true
   tasks:
     - name: Initialize Kubernetes cluster
-      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      shell: |
+        kubeadm init --pod-network-cidr=10.244.0.0/16 --cri-socket=unix:///var/run/cri-dockerd.sock
       register: kubeadm_init
       changed_when: false
       ignore_errors: yes
@@ -142,6 +196,12 @@
   hosts: master
   become: true
   tasks:
+    - name: Install Java
+      apt:
+        name: openjdk-11-jdk
+        state: present
+        update_cache: yes
+
     - name: Add Jenkins repository key
       apt_key:
         url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
@@ -151,6 +211,7 @@
       apt_repository:
         repo: deb https://pkg.jenkins.io/debian-stable binary/
         state: present
+        filename: jenkins
 
     - name: Install Jenkins
       apt:
@@ -158,17 +219,40 @@
         state: present
         update_cache: yes
 
+    - name: Ensure Jenkins user exists
+      user:
+        name: jenkins
+        system: yes
+        shell: /bin/bash
+        home: /var/lib/jenkins
+        createhome: yes
+
+    - name: Set Jenkins directory permissions
+      file:
+        path: /var/lib/jenkins
+        owner: jenkins
+        group: jenkins
+        mode: '0755'
+        state: directory
+
     - name: Start Jenkins service
-      service:
+      systemd:
         name: jenkins
         state: started
         enabled: yes
+        daemon_reload: yes
+      register: jenkins_start
+      ignore_errors: yes
 
-    - name: Add Jenkins user to docker group
-      user:
-        name: jenkins
-        groups: docker
-        append: yes
+    - name: Check Jenkins logs if start failed
+      command: journalctl -u jenkins.service --no-pager -n 50
+      register: jenkins_logs
+      when: jenkins_start.failed
+
+    - name: Display Jenkins logs if start failed
+      debug:
+        var: jenkins_logs.stdout_lines
+      when: jenkins_start.failed
 
     - name: Wait for Jenkins to start up
       uri:

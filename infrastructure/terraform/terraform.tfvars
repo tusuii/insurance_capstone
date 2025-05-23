@@ -1,3 +1,3 @@
 aws_region = "us-east-1"
-# Update this with your SSH public key content
-ssh_public_key = "ssh-rsa AAAA... your-key-here"
+aws_access_key = "YOUR_AWS_ACCESS_KEY"
+aws_secret_key = "YOUR_AWS_SECRET_KEY"

@@ -1,0 +1,14 @@
+[master]
+13.217.116.56 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/insurance-key.pem
+
+[workers]
+23.20.184.205 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/insurance-key.pem
+54.224.66.37 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/insurance-key.pem
+
+[all:vars]
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+ansible_python_interpreter=/usr/bin/python3
+
+[kube_cluster:children]
+master
+workers

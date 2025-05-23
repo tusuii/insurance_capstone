@@ -4,6 +4,16 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "aws_access_key" {
+  description = "AWS access key"
+  type        = string
+}
+
+variable "aws_secret_key" {
+  description = "AWS secret key"
+  type        = string
+}
+
 variable "ubuntu_ami" {
   description = "Ubuntu AMI ID"
   type        = string
@@ -11,7 +21,3 @@ variable "ubuntu_ami" {
   default     = "ami-0261755bbcb8c4a84"
 }
 
-variable "ssh_public_key" {
-  description = "SSH public key for EC2 instances"
-  type        = string
-}
