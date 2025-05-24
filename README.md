@@ -1,4 +1,4 @@
-# Insurance Management System - DevOps Capstone Project
+# Insurance Management System - DevOps Capstone Project.
 
 ## Project Overview
 This project implements a comprehensive insurance management system with a modern DevOps infrastructure. It demonstrates the implementation of a full CI/CD pipeline and infrastructure as code using industry-standard tools and best practices.
