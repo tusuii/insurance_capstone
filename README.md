@@ -54,7 +54,7 @@ This project implements a comprehensive insurance management system with a moder
 
 ### Infrastructure Monitoring
 ![Infrastructure Monitoring](project_images/Screenshot%20From%202025-05-24%2018-59-44.png)
-*Real-time Infrastructure Monitoring Dashboard using Grafana*
+*Prometheus Endpoints*
 
 ### Monitoring Architecture
 - **Prometheus Server**:
