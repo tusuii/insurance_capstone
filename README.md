@@ -11,7 +11,7 @@ This project implements a comprehensive insurance management system with a moder
 - **Backend**: Java/Spring Boot
 - **Build Tool**: Maven
 - **Containerization**: Docker
-- **Container Orchestration**: Kubernetes (K8s)
+- **Container Orchestration**: Kubernetes (K8s)(Minikube local) / docker-compose(AWS)
 - **CI/CD**: Jenkins
 - **Infrastructure as Code**: Terraform
 - **Configuration Management**: Ansible
